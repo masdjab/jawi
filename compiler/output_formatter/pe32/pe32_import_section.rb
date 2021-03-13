@@ -75,7 +75,6 @@ class Pe32ImportSection < SectionBase
 
   public
   def setup(section_base_address, section_file_offset)
-    puts "#{self.class}.setup(0x#{image_base_address.to_s(16)}, 0x#{section_base_address.to_s(16)}, 0x#{section_file_offset.to_s(16)})"
     @section_base_address = section_base_address
     @imports_changed = true
   end
