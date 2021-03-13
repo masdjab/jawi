@@ -1,15 +1,16 @@
 require_relative '../../../libs/binary_converter'
 require_relative '../../../libs/code_util'
+require_relative 'pe32_section'
 
 
-class Pe32ImportSection < SectionBase
-  attr_reader :image_base_address, :section_base_address
+class Pe32ImportSection < Pe32Section
+  attr_accessor :image_base_address, :section_base_address
 
   private
-  def initialize(name, type, flag, image_base_address = 0x400000, section_base_address = 0)
-    super(name, type, flag, "")
-    @image_base_address = image_base_address
-    @section_base_address = section_base_address
+  def initialize(name, type, flag, alignment)
+    super(name, type, flag, alignment, "")
+    @image_base_address = 0
+    @section_base_address = 0
     @libraries = []
     @functions = []
     @imports_changed = true
@@ -75,8 +76,10 @@ class Pe32ImportSection < SectionBase
 
   public
   def setup(section_base_address, section_file_offset)
-    @section_base_address = section_base_address
-    @imports_changed = true
+    if (section_base_address != @section_base_address) || (section_file_offset != @section_file_offset)
+      super(section_base_address, section_file_offset)
+      @imports_changed = true
+    end
   end
   def add_import_item(dll_import)
     if !@libraries.include?(dll_import.module_name)
