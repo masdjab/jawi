@@ -1,0 +1,74 @@
+require_relative '../../libs/binary_converter'
+
+module Compiler
+  module MachineLanguage
+    class Intel16
+      private
+      def hex2bin(value)
+        BinaryConverter.hex2bin(value)
+      end
+      def int2bin(value, size)
+        BinaryConverter.int2bin(value, size)
+      end
+      def compose(code, argpos, arglen)
+        Compiler::MachineCode.new(code, argpos, arglen)
+      end
+      
+      public
+      def set_accumulator(value)
+        compose hex2bin("B8") + int2bin(value, :word), 1, 2
+      end
+      def push_accumulator
+        compose hex2bin("50"), 0, 0
+      end
+      def push_immediate(value)
+        compose hex2bin("68") + int2bin(value, :word), 1, 2
+      end
+      def get_global_variable(location)
+        compose hex2bin("A1") + int2bin(location, :word), 1, 2
+      end
+      def set_global_variable(location, value)
+        compose hex2bin("A3") + int2bin(location, :word), 1, 2
+      end
+      def get_local_variable(index)
+        compose hex2bin("8B46") + int2bin(-((index + 1) * 2), :byte), 2, 1
+      end
+      def set_local_variable(index, value)
+        compose hex2bin("8946") + int2bin(-((index + 1) * 2), :byte), 2, 1
+      end
+      def get_parameter(index)
+        compose hex2bin("8B46") + int2bin((index + 2) * 2, :byte), 2, 1
+      end
+      def call(relative_distance)
+        compose hex2bin("E8") + int2bin(relative_distance, :word), 1, 2
+      end
+      def call_indirect(location)
+        compose hex2bin("FF1E") + int2bin(location, :word), 2, 2
+      end
+      def function_enter(locals_count = 0)
+        if locals_count == 0
+          compose hex2bin("5589E5"), 0, 0
+        else
+          compose hex2bin("5589E583EC") + int2bin(locals_count * 2, :byte), 0, 0
+        end
+      end
+      def function_leave(locals_count = 0)
+        if stack_adjust == 0
+          compose hex2bin("5D"), 0, 0
+        else
+          compose hex2bin("83C4") + int2bin(locals_count * 2, :byte) + hex2bin("5D"), 2, 1
+        end
+      end
+      def return(stack_adjust = 0)
+        if stack_adjust == 0
+          compose hex2bin("C3"), 0, 0
+        else
+          compose hex2bin("C2") + int2bin(stack_adjust * 2, :word), 2, 2
+        end
+      end
+      def jump(relative_distance)
+        compose hex2bin("E9") + int2bin(relative_distance, :word), 1, 2
+      end
+    end
+  end
+end
