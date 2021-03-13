@@ -25,23 +25,24 @@ class Pe32Formatter
   public
   def format(object_code)
     pe_struct = Pe32Struct.new
+    pe_struct.alignment = object_code.alignment
     pe_struct.image_base = @base_address
 
     raw_header_size = Pe32Struct.calc_header_size(object_code.sections.count)
-    size_of_headers = int_align(raw_header_size, pe_struct.section_alignment)
-    section_table = Pe32SectionTable.new(pe_struct, size_of_headers)
+    size_of_headers = int_align(raw_header_size, object_code.alignment.section_alignment)
+    section_table = Pe32SectionTable.new(object_code.alignment, size_of_headers)
     object_code.sections.each{|s|section_table.add s}
-    section_info_code = section_table.find_by_type(:code)
-    section_info_data = section_table.find_by_type(:data)
-    section_info_import = section_table[".idata"]
+    code_sction = section_table.find_by_type(:code)
+    data_section = section_table.find_by_type(:data)
+    import_section = section_table[".idata"]
     binary_image = section_table.get_image
 
-    data_offset = section_info_data.virtual_address
+    data_offset = data_section.virtual_address
     object_code.references.each do |ref|
       if ref.resolver.is_a?(DataResolver32)
         resolved_value = ref.resolver.resolve_reference(@base_address + data_offset)
       elsif ref.resolver.is_a?(ImportResolver32)
-        resolved_value = ref.resolver.resolve_reference(section_info_import.section)
+        resolved_value = ref.resolver.resolve_reference(import_section)
       else
         raise "Cannot resolve reference of type '#{ref.resolver.class}'."
       end
@@ -54,13 +55,13 @@ class Pe32Formatter
       end
     end
 
-    pe_struct.optional_data_directory.import.address = section_info_import.virtual_address
-    pe_struct.optional_data_directory.import.size = section_info_import.virtual_size
-    pe_struct.size_of_code = int_align(section_info_code.section.data.length, pe_struct.file_alignment)
-    pe_struct.size_of_initialized_data = int_align(section_info_data.section.data.length, pe_struct.file_alignment)
-    pe_struct.base_of_code = section_info_code.virtual_address
-    pe_struct.base_of_data = section_info_import.virtual_address
-    pe_struct.entry_point = section_info_code.virtual_address
+    pe_struct.optional_data_directory.import.address = import_section.virtual_address
+    pe_struct.optional_data_directory.import.size = import_section.virtual_size
+    pe_struct.size_of_code = int_align(code_sction.data.length, object_code.alignment.file_alignment)
+    pe_struct.size_of_initialized_data = int_align(data_section.data.length, object_code.alignment.file_alignment)
+    pe_struct.base_of_code = code_sction.virtual_address
+    pe_struct.base_of_data = import_section.virtual_address
+    pe_struct.entry_point = code_sction.virtual_address
     pe_struct.size_of_image = size_of_headers + section_table.get_size_of_image
     pe_struct.section_info_list = section_table.items.values
     pe_struct.image_body = binary_image

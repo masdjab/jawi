@@ -1,10 +1,10 @@
 require_relative '../../../libs/code_util'
-require_relative 'pe32_section_info'
+require_relative 'pe32_section'
 
 
 class Pe32SectionTable
-  def initialize(pe_struct, section_base_address = 0)
-    @pe_struct = pe_struct
+  def initialize(alignment, section_base_address = 0)
+    @alignment = alignment
     @sections = {}
     @section_address = section_base_address
     @file_offset = 0
@@ -35,14 +35,9 @@ class Pe32SectionTable
   end
   def add(section)
     section.setup @section_address, @file_offset
-    section_info = Pe32SectionInfo.new(section)
-    section_info.virtual_size = section.data.length
-    section_info.virtual_address = @section_address
-    section_info.size_of_raw_data = int_align(section_info.virtual_size, @pe_struct.file_alignment)
-    section_info.pointer_to_raw_data = @file_offset
-    @file_offset += section_info.size_of_raw_data
-    @section_address += int_align(section.data.length, @pe_struct.section_alignment)
-    @sections[section.name] = section_info
+    @file_offset += section.size_of_raw_data
+    @section_address += int_align(section.data.length, @alignment.section_alignment)
+    @sections[section.name] = section
   end
   def items
     @sections
@@ -51,14 +46,14 @@ class Pe32SectionTable
     @sections[key]
   end
   def find_by_type(type)
-    @sections.values.find{|s|s.section.type == type}
+    @sections.values.find{|s|s.type == type}
   end
   def get_size_of_image(section_name = nil)
     fetch_sections_by_name(section_name).inject(0) do |a,b|
-      a + int_align(b.virtual_size, @pe_struct.section_alignment)
+      a + int_align(b.virtual_size, @alignment.section_alignment)
     end
   end
   def get_image(section_name = nil)
-    fetch_sections_by_name(section_name).map{|s|str_align(s.section.data, @pe_struct.file_alignment)}.join
+    fetch_sections_by_name(section_name).map{|s|str_align(s.data, @alignment.file_alignment)}.join
   end
 end

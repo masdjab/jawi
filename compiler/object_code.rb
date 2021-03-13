@@ -1,7 +1,9 @@
 class ObjectCode
-  attr_reader :sections, :references
+  attr_reader :base_address, :alignment, :sections, :references
   
-  def initialize
+  def initialize(base_address, alignment)
+    @base_address = base_address
+    @alignment = alignment
     @sections = []
     @references = []
   end

@@ -90,23 +90,22 @@ require_relative '../mz_struct'
 require_relative 'pe32_const'
 require_relative 'pe_version'
 require_relative 'pe32_data_directory'
-require_relative 'pe32_section_info'
+require_relative 'pe32_section'
 require_relative 'pe32_import_section'
 require_relative 'pe32_section_table'
+require_relative '../size_alignment'
 
 
 class Pe32Struct
   attr_accessor \
-    :machine, :timestamp, :pointer_to_symbol_table, 
-    :number_of_symbols, :size_of_optional_header, :characteristics, 
-    :magic_number, :linker_version, :size_of_code, :size_of_initialized_data, 
-    :size_of_uninitialized_data, :entry_point, :base_of_code, :base_of_data, 
-    :image_base, :section_alignment, :file_alignment, :os_version, 
-    :image_version, :subsystem_version, 
-    :size_of_image, :subsystem, :dll_characteristics, 
-    :size_of_stack_reserve, :size_of_stack_commit, :size_of_heap_reserve, 
-    :size_of_heap_commit, :loader_flags, :optional_data_directory, 
-    :section_info_list, :image_body
+    :machine, :timestamp, :pointer_to_symbol_table,
+    :number_of_symbols, :size_of_optional_header, :characteristics,
+    :magic_number, :linker_version, :size_of_code, :size_of_initialized_data,
+    :size_of_uninitialized_data, :entry_point, :base_of_code, :base_of_data,
+    :image_base, :alignment, :os_version, :image_version, :subsystem_version,
+    :size_of_image, :subsystem, :dll_characteristics, :size_of_stack_reserve,
+    :size_of_stack_commit, :size_of_heap_reserve, :size_of_heap_commit,
+    :loader_flags, :optional_data_directory, :section_info_list, :image_body
   
   private
   def initialize
@@ -125,8 +124,7 @@ class Pe32Struct
     @base_of_code = 0
     @base_of_data = 0
     @image_base = Pe32Const::DEFAULT_IMAGE_BASE_ADDRESS
-    @section_alignment = Pe32Const::DEFAULT_SECTION_ALIGNMENT
-    @file_alignment = Pe32Const::DEFAULT_FILE_ALIGNMENT
+    @alignment = Pe32SizeAlignment.new
     @os_version = PeVersion.new(1, 0)
     @image_version = PeVersion.new(0, 0)
     @subsystem_version = PeVersion.new(4, 0)
@@ -167,16 +165,16 @@ class Pe32Struct
     Pe32Const::FIXED_HEADER_SIZE + (num_of_sections * Pe32Const::SIZE_OF_SECTION_INFO)
   end
   def to_bin
-    if @file_alignment < 0x200
-      raise "PE32.file_alignment must not less than 512, #{@file_alignment} given."
-    elsif @file_alignment > 0xffff
-      raise "PE32.file_alignment must not greater than 65535, #{@file_alignment} given."
-    elsif (@file_alignment % 2) != 0
-      raise "PE32.file_alignment must be a power of 2, #{@file_alignment} given."
-    elsif @section_alignment < @file_alignment
-      raise "PE32.section_alignment (#{@section_alignment}) must not less than PE32.file_alignment (#{@file_alignment})."
-    elsif (@image_body.length > 0) && ((@image_body.length % @file_alignment) != 0)
-      raise "The size of PE32.image_body (#{@image_body.length}) must be aligned with the PE32.file_alignment (#{@file_alignment})."
+    if @alignment.file_alignment < 0x200
+      raise "PE32.file_alignment must not less than 512, #{@alignment.file_alignment} given."
+    elsif @alignment.file_alignment > 0xffff
+      raise "PE32.file_alignment must not greater than 65535, #{@alignment.file_alignment} given."
+    elsif (@alignment.file_alignment % 2) != 0
+      raise "PE32.file_alignment must be a power of 2, #{@alignment.file_alignment} given."
+    elsif @alignment.section_alignment < @alignment.file_alignment
+      raise "PE32.section_alignment (#{@alignment.section_alignment}) must not less than PE32.file_alignment (#{@alignment.file_alignment})."
+    elsif (@image_body.length > 0) && ((@image_body.length % @alignment.file_alignment) != 0)
+      raise "The size of PE32.image_body (#{@image_body.length}) must be aligned with the PE32.file_alignment (#{@alignment.file_alignment})."
     end
     
     mz_struct = MzStruct.new
@@ -191,58 +189,58 @@ class Pe32Struct
     
     file_timestamp = @timestamp ? @timestamp : Time.new
     raw_header_size = self.class.calc_header_size(@section_info_list.count)
-    size_of_headers = int_align(raw_header_size, @file_alignment)
+    size_of_headers = int_align(raw_header_size, @alignment.file_alignment)
     section_info_bin = @section_info_list.map{|x|x.to_bin(size_of_headers)}.join
     
     header = 
       [
-        str_align(mz_struct.to_bin, 0x10), 
-        "PE\0\0",                                             # 0080
-        
-        # COFF File Header
-        int2bin(@machine, :word),                             # 0084
-        int2bin(@section_info_list.count, :word),             # 0086
-        int2bin(timestamp_to_int(file_timestamp), :dword),    # 0088
-        int2bin(@pointer_to_symbol_table, :dword),            # 008C
-        int2bin(@number_of_symbols, :dword),                  # 0090
-        int2bin(@size_of_optional_header, :word),             # 0094
-        int2bin(@characteristics, :word),                     # 0096
-        
-        # Optional Header
-        int2bin(@magic_number, :word),                        # 0098
-        int2bin(@linker_version.major, :byte),                # 009A
-        int2bin(@linker_version.minor, :byte),                # 009B
-        int2bin(@size_of_code, :dword),                       # 009C
-        int2bin(@size_of_initialized_data, :dword),           # 00A0
-        int2bin(@size_of_uninitialized_data, :dword),         # 00A4
-        int2bin(@entry_point, :dword),                        # 00A8
-        int2bin(@base_of_code, :dword),                       # 00AC
-        int2bin(@base_of_data, :dword),                       # 00B0
-        int2bin(@image_base, :dword),                         # 00B4
-        int2bin(@section_alignment, :dword),                  # 00B8
-        int2bin(@file_alignment, :dword),                     # 00BC
-        int2bin(@os_version.major, :word),                    # 00C0
-        int2bin(@os_version.minor, :word),                    # 00C2
-        int2bin(@image_version.major, :word),                 # 00C4
-        int2bin(@image_version.minor, :word),                 # 00C6
-        int2bin(@subsystem_version.major, :word),             # 00C8
-        int2bin(@subsystem_version.minor, :word),             # 00CA
-        int2bin(win32_version_value = 0, :dword),             # 00CC
-        int2bin(@size_of_image, :dword),                      # 00D0
-        int2bin(size_of_headers, :dword),                     # 00D4
-        int2bin(checksum = 0, :dword),                        # 00D8
-        int2bin(@subsystem, :word),                           # 00DC
-        int2bin(@dll_characteristics, :word),                 # 00DE
-        int2bin(@size_of_stack_reserve, :dword),              # 00E0
-        int2bin(@size_of_stack_commit, :dword),               # 00E4
-        int2bin(@size_of_heap_reserve, :dword),               # 00E8
-        int2bin(@size_of_heap_commit, :dword),                # 00EC
-        int2bin(@loader_flags, :dword),                       # 00F0
-        int2bin(@optional_data_directory.count, :dword),      # 00F4
-        @optional_data_directory.to_bin,                      # 00F8
-        section_info_bin,                                     # 0178
+          str_align(mz_struct.to_bin, 0x10),
+          "PE\0\0",                                                 # 0080
+
+          # COFF File Header
+          int2bin(@machine, :word),                             # 0084
+          int2bin(@section_info_list.count, :word),             # 0086
+          int2bin(timestamp_to_int(file_timestamp), :dword),    # 0088
+          int2bin(@pointer_to_symbol_table, :dword),            # 008C
+          int2bin(@number_of_symbols, :dword),                  # 0090
+          int2bin(@size_of_optional_header, :word),             # 0094
+          int2bin(@characteristics, :word),                     # 0096
+
+          # Optional Header
+          int2bin(@magic_number, :word),                        # 0098
+          int2bin(@linker_version.major, :byte),                # 009A
+          int2bin(@linker_version.minor, :byte),                # 009B
+          int2bin(@size_of_code, :dword),                       # 009C
+          int2bin(@size_of_initialized_data, :dword),           # 00A0
+          int2bin(@size_of_uninitialized_data, :dword),         # 00A4
+          int2bin(@entry_point, :dword),                        # 00A8
+          int2bin(@base_of_code, :dword),                       # 00AC
+          int2bin(@base_of_data, :dword),                       # 00B0
+          int2bin(@image_base, :dword),                         # 00B4
+          int2bin(@alignment.section_alignment, :dword),        # 00B8
+          int2bin(@alignment.file_alignment, :dword),           # 00BC
+          int2bin(@os_version.major, :word),                    # 00C0
+          int2bin(@os_version.minor, :word),                    # 00C2
+          int2bin(@image_version.major, :word),                 # 00C4
+          int2bin(@image_version.minor, :word),                 # 00C6
+          int2bin(@subsystem_version.major, :word),             # 00C8
+          int2bin(@subsystem_version.minor, :word),             # 00CA
+          int2bin(win32_version_value = 0, :dword),             # 00CC
+          int2bin(@size_of_image, :dword),                      # 00D0
+          int2bin(size_of_headers, :dword),                     # 00D4
+          int2bin(checksum = 0, :dword),                        # 00D8
+          int2bin(@subsystem, :word),                           # 00DC
+          int2bin(@dll_characteristics, :word),                 # 00DE
+          int2bin(@size_of_stack_reserve, :dword),              # 00E0
+          int2bin(@size_of_stack_commit, :dword),               # 00E4
+          int2bin(@size_of_heap_reserve, :dword),               # 00E8
+          int2bin(@size_of_heap_commit, :dword),                # 00EC
+          int2bin(@loader_flags, :dword),                       # 00F0
+          int2bin(@optional_data_directory.count, :dword),      # 00F4
+          @optional_data_directory.to_bin,                          # 00F8
+          section_info_bin,                                         # 0178
       ]
     
-    str_align(header.join, @file_alignment) + @image_body
+    str_align(header.join, @alignment.file_alignment) + @image_body
   end
 end

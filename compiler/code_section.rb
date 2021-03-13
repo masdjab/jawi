@@ -8,20 +8,24 @@ end
 
 
 class SectionBase
-  attr_reader   :name, :type, :flag
-  attr_accessor :data
+  attr_reader   :name, :type, :flag, :alignment
+  attr_accessor :data, :section_base_address
 
   private
-  def initialize(name, type, flag, data = "")
+  def initialize(name, type, flag, alignment, data = "")
     @name = name
     @type = type
     @flag = flag
     @data = data
+    @alignment = alignment
+    @section_base_address = 0
+    @section_file_offset = 0
   end
 
   public
   def setup(section_base_address, section_file_offset)
-    # do nothing
+    @section_base_address = section_base_address
+    @section_file_offset = section_file_offset
   end
 end
 
