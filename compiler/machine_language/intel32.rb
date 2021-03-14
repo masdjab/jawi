@@ -15,7 +15,7 @@ module Compiler
       end
       
       public
-      def set_accumulator(value)
+      def set_accumulator(value, size)
         compose hex2bin("B8") + int2bin(value, :dword), 1, 4
       end
       def push_accumulator
@@ -24,19 +24,19 @@ module Compiler
       def push_immediate(value)
         compose hex2bin("68") + int2bin(value, :dword), 1, 4
       end
-      def get_global_variable(location)
+      def get_global_variable(location, size)
         compose hex2bin("A1") + int2bin(location, :dword), 1, 4
       end
-      def set_global_variable(location, value)
+      def set_global_variable(location, size, value)
         compose hex2bin("A3") + int2bin(location, :dword), 1, 4
       end
-      def get_local_variable(index)
+      def get_local_variable(index, size)
         compose hex2bin("8B45") + int2bin(-((index + 1) * 4), :byte), 2, 1
       end
-      def set_local_variable(index, value)
+      def set_local_variable(index, size, value)
         compose hex2bin("8945") + int2bin(-((index + 1) * 4), :byte), 2, 1
       end
-      def get_parameter(index)
+      def get_parameter(index, size)
         compose hex2bin("8B45") + int2bin((index + 2) * 4, :byte), 0, 0
       end
       def call(relative_distance)
