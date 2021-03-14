@@ -1,0 +1,50 @@
+interface Greetable
+  void greet()
+end
+
+interface NamedHumand
+  str get_name()
+end
+
+
+class Person < Greetable
+  public str name
+  getter age
+  setter age
+  
+  private void initialize(str name, int age)
+    @name = name
+    @age = age
+  end
+  public void greet()
+    puts "Hello #{@name}..."
+  end
+end
+
+
+class Programmer < Person, Greetable, NamedHumand
+  private str lang
+  
+  private void initialize(str name, int age, str lang)
+    super(name, age)
+    @lang = lang
+  end
+  public void greet()
+    puts "Hello #{@name}, you are a #{@lang} programmer, right?"
+  end
+  public void get_name()
+    return @name
+  end
+end
+
+
+class Greeter
+  public void greet(NamedHuman human)
+    puts "Hello #{human.name}..."
+  end
+end
+
+
+Greeter greeter = Greeter.new
+Programmer programmer = Programmer.new("Agus", 14, "Ruby")
+greeter.greet(programmer)

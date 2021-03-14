@@ -1,0 +1,6 @@
+class IO
+  public byte[] read
+  end
+  public void write(byte[] data)
+  end
+end

@@ -1,0 +1,9 @@
+interface FileSystem
+  FileInfo[] find(str spec)
+  IO create(str filename)
+  void delete(str filename)
+  IO open(str filename, str mode)
+  close
+  read
+  write
+end

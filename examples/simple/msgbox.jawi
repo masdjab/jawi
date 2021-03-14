@@ -1,0 +1,8 @@
+import('user32.dll', 'MessageBoxA') int msgbox(int hwnd, str title, str message, int flags)
+import('kernel32.dll', 'ExitProcess') int exit_process(int arg)
+
+str title = "Message Title\0"
+str message = "This is a MessageBox test using Jawi Compiler.\0"
+
+int resp = msgbox(0, message, title, 0)
+exit_process 0
