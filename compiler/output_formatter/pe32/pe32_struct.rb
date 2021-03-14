@@ -195,7 +195,7 @@ class Pe32Struct
     header = 
       [
           str_align(mz_struct.to_bin, 0x10),
-          "PE\0\0",                                                 # 0080
+          "PE\0\0",                                             # 0080
 
           # COFF File Header
           int2bin(@machine, :word),                             # 0084
@@ -237,8 +237,8 @@ class Pe32Struct
           int2bin(@size_of_heap_commit, :dword),                # 00EC
           int2bin(@loader_flags, :dword),                       # 00F0
           int2bin(@optional_data_directory.count, :dword),      # 00F4
-          @optional_data_directory.to_bin,                          # 00F8
-          section_info_bin,                                         # 0178
+          @optional_data_directory.to_bin,                      # 00F8
+          section_info_bin,                                     # 0178
       ]
     
     str_align(header.join, @alignment.file_alignment) + @image_body
