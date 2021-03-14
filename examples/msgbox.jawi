@@ -1,8 +1,0 @@
-msgbox = import_dll('user32.dll', 'MessageBoxA')
-exit_process = import_dll('kernel32.dll', 'ExitProcess')
-
-_title = "Message Title\0"
-_message = "This is a MessageBox test using Jawi Compiler.\0"
-
-msgbox 0, _message, _title, 0
-exit_process 0
