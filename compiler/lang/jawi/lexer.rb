@@ -1,0 +1,861 @@
+require_relative 'lex_types'
+require_relative '../../../libs/fetcher'
+require_relative '../../../libs/node_fetcher'
+require_relative '../../../libs/position_info_provider'
+require_relative '../../symbols/symbol_base'
+require_relative '../../parser/parsing_exceptions'
+require_relative '../../parser/tokenizer'
+# require_relative 'node_fetcher'
+# require_relative 'operation'
+# require_relative 'shunting_yard'
+
+
+module Jawi
+  BASIC_TYPES = %w(void byte int str)
+  RESERVED_WORDS = %w(
+    private protected public static void byte int str class def
+    if elsif else end do nil true false loop while for
+  )
+  OPERATORS = %w(+ - * / & | += -= *= /= &= |= == != < > <= >= << >>)
+  
+  
+  class Lexer
+    private
+    def initialize(source_provider, main_source_name)
+      @source_provider = source_provider
+      @main_source_name = main_source_name
+      @symbols = []
+      @contexts = []
+      @position_info_provider = nil
+      @fetcher = nil
+      @access_modifier = nil
+    end
+    def position_info(pos)
+      @position_info_provider ? @position_info_provider.get_position_info(pos) : pos
+    end
+    def expected_text(pos, expected, found)
+      ExpectedTextException.new(position_info(pos), expected, found)
+    end
+    def unexpected_text(pos, text)
+      UnexpectedTextException.new(position_info(pos), text)
+    end
+    def is_a_type?(text)
+      if BASIC_TYPES.include?(text)
+        true
+      else
+        symbol = @symbols.find{|s|(s.name == text) && (s.type == :class)}
+        !symbol.nil?
+      end
+    end
+    def skip_whitespaces
+      nodes = []
+      while @fetcher.current
+        node = @fetcher.current
+        if node.type == :whitespace
+          nodes << @fetcher.fetch
+        else
+          break
+        end
+      end
+      nodes
+    end
+    def fetch_non_whitespace
+      node = nil
+      while @fetcher.current
+        node = @fetcher.fetch
+        break if node.type != :whitespace
+      end
+      node
+    end
+    def fetch_variable_declaration
+      nodes = []
+      anchor = @fetcher.pos
+      
+      modifier_token = nil
+      if %w(private protected public).include?((token = @fetcher.current).text)
+        modifier_token = @fetcher.fetch
+        if @fetcher.current.type != :identifier
+          raise expected_text(@fetcher.pos, 'identifier', @fetcher.current.text)
+        end
+      end
+      
+      type_token = @fetcher.fetch
+      if @fetcher.current.nil? || (@fetcher.current.type != :identifier)
+        raise expected_text(@fetcher.pos, 'identifier', @fetcher.current ? @fetcher.current.text : nil)
+      end
+      
+      while token = @fetcher.current
+        if token.type != :identifier
+          raise expected_text(@fetcher.pos, 'identifier', @fetcher.current.text)
+        else
+          name_token = @fetcher.fetch
+        end
+        
+        nodes << Lex::VariableDeclaration.new(anchor, name_token, type_token, modifier_token)
+        
+        if @fetcher.current.nil? || [:comment, :cr, :lf, :crlf].include?(@fetcher.current.type)
+          @fetcher.fetch
+          break
+        elsif !@fetcher.current.nil? && (@fetcher.current.type == :comma)
+          @fetcher.fetch
+        else
+          raise expected_text(@fetcher.pos, 'end of line', @fetcher.current ? @fetcher.current.text : nil)
+        end
+      end
+      
+      nodes
+    end
+    def fetch_function_declaration
+      anchor = @fetcher.pos
+      
+      def_token = @fetcher.fetch
+      
+      static_token = nil
+      if @fetcher.current.text == "static"
+        static_token = @fetcher.fetch
+        if !@fetcher.current || (@fetcher.current.type != :identifier)
+          raise expected_text(@fetcher.pos, 'identifier', @fetcher.current ? @fetcher.current.text : nil)
+        end
+      end
+      
+      type_token = @fetcher.fetch
+      if @fetcher.current.nil? || (@fetcher.current.type != :identifier)
+        raise expected_text(@fetcher.pos, 'identifier', @fetcher.current ? @fetcher.current.text : nil)
+      end
+      
+      name_token = @fetcher.fetch
+      
+      arguments = []
+      if @fetcher.current.nil?
+        raise expected_text(@fetcher.pos, 'function body', nil)
+      elsif [:comment, :cr, :lf, :crlf].include?(@fetcher.current.type)
+        @fetcher.fetch
+      elsif @fetcher.current.type == :lbrk
+        @fetcher.fetch
+        
+        while @fetcher.current
+          argument_anchor = @fetcher.pos
+          type = nil
+          name = nil
+          
+          if @fetcher.current.nil? || (@fetcher.current.type != :identifier)
+            raise expected_text(@fetcher.pos, 'type', @fetcher.current ? @fetcher.current.text : nil)
+          else
+            type = @fetcher.fetch
+          end
+          if @fetcher.current.nil? || (@fetcher.current.type != :identifier)
+            raise expected_text(@fetcher.pos, 'identifier', @fetcher.current ? @fetcher.current.text : nil)
+          else
+            name = @fetcher.fetch
+          end
+          
+          arguments << Lex::FunctionArgument.new(argument_anchor, name, type)
+          
+          if @fetcher.current.nil?
+            raise expected_text(@fetcher.pos, ')')
+          elsif @fetcher.current.type == :comma
+            @fetcher.fetch
+          elsif @fetcher.current.type == :rbrk
+            @fetcher.fetch
+            break
+          end
+        end
+      else
+        raise unexpected_text(@fetcher.pos, @fetcher.current ? @fetcher.current.text : nil)
+      end
+      
+      modifiers = [@access_modifier, static_token].select{|x|!x.nil?}
+      [Lex::FunctionDeclaration.new(anchor, name_token, type_token, modifiers, arguments)]
+    end
+    def fetch_variable_assignment
+      # anchor = @fetcher.pos
+      []
+    end
+    def parse_source_code(source_name)
+      nodes = []
+
+      source = @source_provider.get_source(source_name)
+      fetcher = Fetcher.new(source)
+      @position_info_provider = PositionInfoProvider.new(source)
+      tokenizer = Tokenizer.new(fetcher, @position_info_provider)
+      tokens = tokenizer.tokenize
+      tokens_info = 
+        tokens
+        .select{|t|![:cr, :lf, :crlf, :whitespace, :comment].include?(t.type)}
+        .map{|t|"#{t.type}(#{t.text})"}.join($/)
+      puts "#{tokens_info}\n\n"
+      @fetcher = NodeFetcher.new(tokens, [:whitespace])
+      
+      while token = @fetcher.current
+        anchor = @fetcher.pos
+        
+        if [:whitespace, :cr, :lf, :crlf, :comment].include?(token.type)
+          @fetcher.fetch
+        elsif token.type == :identifier
+          if token.text == "if"
+            raise "Cannot handle #{token.class}(#{token.text})."
+          elsif token.text == "end"
+            @fetcher.fetch
+          elsif (token.text == "private") || (token.text == "public")
+            modifier = @fetcher.fetch
+            @access_modifier == modifier.text
+          elsif token.text == "def"
+            if items = fetch_function_declaration
+              nodes += items
+            end
+          else
+            while @fetcher.current && (@fetcher.current.type == :identifier)
+              @fetcher.fetch
+            end
+            
+            last_token = @fetcher.current
+            @fetcher.pos = anchor
+            
+            if !last_token.nil? && (last_token.type == :assign)
+              handler = method:fetch_variable_assignment
+            else
+              handler = method:fetch_variable_declaration
+            end
+            
+            if items = handler.call
+              nodes += items
+            end
+          end
+        else
+          raise "Cannot handle #{token.class}(#{token.text})."
+        end
+      end
+
+      nodes
+    end
+
+    public
+    def lex
+      parse_source_code(@main_source_name)
+    end
+  end
+end
+
+
+=begin
+module Jawi
+  class Lexer
+    # class responsibility:
+    # convert tokens into ast nodes
+
+    RESERVED_WORDS = %w(class def if elsif else end do nil true false loop while for)
+    OPERATORS = %w(+ - * / & | += -= *= /= &= |= == != < > <= >= << >>)
+
+    attr_reader   :shunting_yard
+    attr_accessor :error_formatter
+
+    private
+    def initialize(name_detector, shunting_yard = nil)
+      @name_detector = name_detector
+      @shunting_yard = shunting_yard ? shunting_yard : ShuntingYard.new
+      @error_formatter = ParsingExceptionFormatter.new
+    end
+    def raize(msg, node = nil)
+      if node
+        raise ParsingError.new(msg, node.row, node.col, node.source)
+      else
+        raise ParsingError.new(msg, nil, nil, nil)
+      end
+    end
+    def shunt_yard(nodes)
+      @shunting_yard.process(nodes)
+    end
+    def takeout(nodes)
+      nodes.is_a?(Array) && (nodes.count == 1) ? nodes[0] : nodes
+    end
+    def create_send_node(receiver, command, args)
+      values = args.items ? args.items : []
+
+      if receiver.nil? && !args.encloser1.nil? && !args.encloser2.nil? && (args.encloser1.type == :lsbrk) && (args.encloser2.type == :rsbrk)
+        if !args.assign.nil?
+          Lex::Send.new(command, Lex::Node.new(0, 0, nil, :wbi, "[]="), values)
+        else
+          Lex::Send.new(command, Lex::Node.new(0, 0, nil, :rbi, "[]"), values)
+        end
+      else
+        Lex::Send.new(receiver, command, values)
+      end
+    end
+    def create_array(values)
+      Lex::Array.new(values)
+    end
+    def create_hash(values)
+      temp = values.map{|x|x}
+      list = []
+
+      while !temp.empty?
+        k, a, v = temp.shift, temp.shift, temp.shift
+        list << k << v
+      end
+
+      Lex::Hash.new(list)
+    end
+    def process_non_method_call(receiver, name_node, args_node)
+      args = args_node.is_a?(Array) ? args_node : args_node.items
+
+      if name_node.text == "import"
+        if ![2, 3].include?(args.count)
+          raize "Import require 2 or 3 parameters, #{args.count} given.", name_node
+        else
+          @name_detector.import_function args[0], args[1], args.count > 2 ? args[2] : nil
+          nil
+        end
+      else
+        create_send_node receiver, name_node, args_node
+      end
+    end
+    def convert_expressions_to_nodes(expr)
+      if expr.is_a?(Array)
+        expr.map{|x|convert_expressions_to_nodes(x)}
+      elsif expr.is_a?(Operation)
+        rec = convert_expressions_to_nodes(expr.rec)
+        op1 = convert_expressions_to_nodes(expr.op1)
+        op2 = convert_expressions_to_nodes(expr.op2)
+
+        if (cmd = expr.cmd).type == :dot
+          [cmd, rec, op1, op2]
+        elsif cmd.type == :assign
+          [cmd, op1, op2]
+        else
+          dot_node = Lex::Node.new(cmd.row, cmd.col, nil, :dot, ".")
+          cmd_node = Lex::Node.new(cmd.row, cmd.col, nil, :identifier, cmd.text)
+          [dot_node, op1, cmd, [op2]]
+        end
+      else
+        expr
+      end
+    end
+    def skip_whitespaces(fetcher)
+      fetcher.skip [:whitespace, :comment]
+    end
+    def skip_linefeed(fetcher)
+      fetcher.skip [:cr, :lf, :crlf, :whitespace, :comment]
+    end
+    def fetch_word(fetcher, text, required)
+      if (node = fetcher.check).is_a?(Lex::Node) && (node.type == :identifier) && (node.text == text)
+        fetcher.fetch
+      elsif required
+        if node.nil?
+          raize "Expected '#{text}'", fetcher.last
+        else
+          raize "Expected '#{text}', found #{node.inspect}", node
+        end
+      end
+    end
+    def fetch_variable(fetcher)
+      if (node = fetcher.fetch).nil?
+        raize "Expected variable", fetcher.last
+      elsif node.type != :identifier
+        raize "Expected variable, found #{node.inspect}", node
+      else
+        @name_detector.register_variable node.text
+        node
+      end
+    end
+    def fetch_values(fetcher)
+      args = []
+      lbrk = nil
+      rbrk = nil
+      asgn = nil
+      wspc = nil
+      ebrk = nil
+
+      if (node = fetcher.check(1, false, false, false)) && node.is_a?(Lex::Node) && [:lbrk, :lsbrk, :lcbrk].include?(node.type)
+        lbrk = fetcher.fetch
+      elsif (node = fetcher.check(2, false, false, false)).select{|x|!x.is_a?(Lex::Node)}.empty? \
+      && (node[0].type == :whitespace) && [:lbrk, :lsbrk, :lcbrk, :identifier, :string, :number].include?(node[1].type)
+        wspc = fetcher.fetch(1, false, false, false)
+      end
+
+      if lbrk
+        ebrk = {lbrk: :rbrk, lsbrk: :rsbrk, lcbrk: :rcbrk}[lbrk.type]
+      end
+
+      if lbrk || wspc
+        while fetcher.check
+          if !(val = fetch_single_expression(fetcher)).empty?
+            args += val
+          end
+
+          if !(node = fetcher.check).nil? && node.is_a?(Lex::Node) && (node.type == :comma)
+            fetcher.fetch
+            fetcher.skip [:whitespace, :comment, :cr, :lf, :crlf]
+          else
+            break
+          end
+        end
+
+        if node = fetcher.check
+          if [:rbrk, :rsbrk, :rcbrk].include?(node.type)
+            if !lbrk
+              raize "Unexpected '#{node.text}'", node
+            elsif node.type != ebrk
+              raize "Expected #{ebrk}, found #{node.type}", node
+            else
+              rbrk = fetcher.fetch
+            end
+          end
+        end
+
+        if !lbrk.nil?
+          if rbrk.nil?
+            echr = {rbrk: ')', rsbrk: ']', rcbrk: '}'}[ebrk]
+            raize "Expected '#{echr}'", fetcher.element
+          elsif (node = fetcher.check) && (node.is_a?(Lex::Node)) && (node.type == :assign)
+            if lbrk.type != :lsbrk
+              raize "Unexpected '='", node
+            else
+              asgn = fetcher.fetch
+
+              if !(val = fetch_single_expression(fetcher)).empty?
+                args += val
+              end
+            end
+          end
+        end
+      end
+
+      Lex::Values.new(args, lbrk, rbrk, asgn)
+    end
+    def fetch_identifier(fetcher)
+      identifier = nil
+
+      if (node = fetcher.check) && node.is_a?(Lex::Node)
+        if (nx = fetcher.check(2, false, false, false)).select{|x|!x.is_a?(Lex::Node)}.empty? \
+        && (nx[0].type == :identifier) && "!?".include?(nx[1].text)
+          # ex: empty!, empty?
+          n1 = fetcher.fetch(2, false, false, false)
+          nx = n1[0]
+          nx.text += n1[1].text
+          identifier = nx
+        elsif node.type == :identifier
+          identifier = fetcher.fetch
+        elsif node.text == "@"
+          node = fetcher.fetch
+
+          if (nx = fetcher.check(2, false, false, false)) && (nx[0].text == "@") && (nx[1].type == :identifier)
+            # @@identifier
+            nx = fetcher.fetch(2, false, false, false)
+            node.type = :identifier
+            node.text = node.text + nx.map{|x|x.text}.join
+            identifier = node
+            @name_detector.register_class_variable node.text
+          elsif (nx = fetcher.check(1, false, false, false)) && (nx.type == :identifier)
+            # @identifier
+            node.type = :identifier
+            node.text = node.text + fetcher.fetch.text
+            identifier = node
+            @name_detector.register_instance_variable node.text
+          else
+            raize "Invalid syntax", node
+          end
+        end
+      end
+
+      identifier
+    end
+    def fetch_operand(fetcher, receiver, is_dot_method)
+      val = nil
+
+      if val.nil? && is_dot_method
+        if (n1 = fetcher.check(3, false, false, false)).select{|x|!x.is_a?(Lex::Node)}.empty? \
+        && (n1.map{|x|x.type} == [:identifier, :whitespace, :assign])
+          # ex: .b = v
+          n1 = fetcher.fetch(3, false, false, false)
+          nx = n1[0]
+          nx.text += n1[2].text
+          val = create_send_node(receiver, nx, fetch_values(fetcher))
+        elsif (n1 = fetcher.check(2, false, false, false)).select{|x|!x.is_a?(Lex::Node)}.empty? \
+        && (n1.map{|x|x.type} == [:identifier, :assign])
+          # ex: .b = v
+          n1 = fetcher.fetch(2, false, false, false)
+          nx = n1[0]
+          nx.text += n1[1].text
+          val = create_send_node(receiver, nx, fetch_values(fetcher))
+        end
+      end
+
+      if val.nil? && (n1 = fetcher.check) && n1.is_a?(Lex::Node)
+        if (n1.type == :lbrk) && !(args = fetch_values(fetcher)).items.empty?
+          # ex: (1 + 2)
+          val = args.items.count == 1 ? args.items[0] : args.items
+        elsif (n1.type == :lsbrk)
+          # ex: [1, 2, 3]
+          val = create_array(fetch_values(fetcher).items)
+        elsif (n1.type == :lcbrk)
+          # ex: {"one" => 1, "two" => 2, "three" => 3}
+          val = create_hash(fetch_values(fetcher).items)
+        end
+      end
+
+      if val.nil?
+        if node = fetch_identifier(fetcher)
+          if (nx = fetcher.check(1, false, false, false)) && [:lbrk, :lsbrk].include?(nx.type)
+            # ex: identifier(...) or identifier[...]
+            val = process_non_method_call(receiver, node, fetch_values(fetcher))
+          elsif (nx = fetcher.check(1, false, false, false)) && (nx.type == :whitespace) && !(args = fetch_values(fetcher)).items.empty?
+            # ex: identifier ...
+            val = process_non_method_call(receiver, node, args)
+          elsif is_dot_method
+            # ex: .a
+            val = create_send_node(receiver, node, Lex::Values.new(nil, nil, nil))
+          else
+            # ex: a, @a, Person, self
+
+            vn = node.text
+            if !RESERVED_WORDS.include?(vn) && !["self"].include?(vn) && (vn[0] != "@")
+              @name_detector.register_identifier vn
+            end
+
+            val = node
+          end
+        elsif (node = fetcher.check) && node.is_a?(Lex::Node) && [:string, :number].include?(node.type)
+          if !is_dot_method
+            # ex: "123"
+            val = fetcher.fetch
+          else
+            raize "Invalid method", node
+          end
+        end
+      end
+
+      if val
+        if (node = fetcher.check(1, false, false, false)) && node.is_a?(Lex::Node) && (node.type == :dot)
+          fetcher.fetch
+
+          if cmd = fetch_operand(fetcher, val, true)
+            val = cmd
+          else
+            raize "Expected method name", fetcher.element
+          end
+        end
+      end
+
+      val
+    end
+    def fetch_single_expression(fetcher)
+      body = []
+
+      while node = fetcher.check
+        oldpos = fetcher.pos
+
+        fetcher.skip [:whitespace]
+
+        if node.is_a?(Lex::Node) && (node.type == :identifier) && ["do", "end"].include?(node.text)
+          break
+        elsif node.is_a?(Lex::Node) && (node.type == :identifier) && ["break"].include?(node.text)
+          body << fetcher.fetch
+        elsif [:comma, :rbrk, :rsbrk, :rcbrk, :cr, :lf, :crlf].include?(node.type)
+          break
+        elsif ShuntingYard::PRECEDENCE.key?(node.type)
+          body << fetcher.fetch
+        elsif operand = fetch_operand(fetcher, nil, false)
+          body << operand
+        elsif node.type == :backslash
+          fetcher.fetch
+          skip_linefeed fetcher
+        else
+          body << fetcher.fetch
+        end
+
+        if fetcher.pos == oldpos
+          raize "Parse nothing in fetch_single_expression", fetcher.element
+          break
+        end
+      end
+
+      shunt_yard(body)
+    end
+    def fetch_class_def(fetcher)
+      if (identifier = fetcher.fetch).type != :identifier
+        raize "Class definition must start with 'class'", identifier
+      elsif identifier.text != "class"
+        raize "Class definition must start with 'class'", identifier
+      end
+
+      classname = ""
+      if (name_node = fetcher.fetch).nil?
+        raize "Incomplete class definition", name_node
+      elsif name_node.type != :identifier
+        raize "Expected class name, got #{name_node.inspect}", name_node
+      else
+        class_name = name_node.text
+      end
+
+      super_node = nil
+      if (test_node = fetcher.check).text == "<"
+        x = fetcher.fetch
+        if (super_node = fetcher.fetch).nil?
+          raize "Expected superclass name"
+        elsif super_node.type != :identifier
+          raize "Expected superclass name"
+        end
+      end
+
+      @name_detector.enter_scope :class, class_name
+      @name_detector.register_class class_name, (super_node ? super_node.text : nil)
+      body_node = fetch_sexp(fetcher)
+      fetch_word fetcher, "end", true
+      @name_detector.leave_scope
+
+      Lex::Class.new(name_node, super_node, body_node)
+    end
+    def fetch_function_params(fetcher)
+      params = []
+
+      if (node = fetcher.check) && (node.type == :lbrk)
+        rbracket = false
+        fetcher.fetch
+
+        while node = fetcher.check
+          if node.type == :rbrk
+            fetcher.fetch
+            rbracket = true
+            break
+          elsif node.type == :comma
+            fetcher.fetch
+          else
+            params << fetcher.fetch
+          end
+        end
+
+        if !rbracket
+          raize "Expected ')'", fetcher.last
+        end
+      end
+
+      params
+    end
+    def fetch_function_def(fetcher)
+      if ((identifier = fetcher.fetch).type != :identifier) || (identifier.text != "def")
+        raize "Function definition must start with 'def'", identifier
+      end
+
+      name_node = nil
+      if (node = fetcher.check).nil?
+        raize "Incomplete function definition", node
+      elsif fetcher.check(3).map{|x|x ? x.text : "nil"}.join == "[]="
+        node = fetcher.fetch(3)
+        name_node = node[0]
+        name_node.type = :identifier
+        name_node.text = node.map{|x|x.text}.join
+      elsif fetcher.check(2).map{|x|x ? x.text : "nil"}.join == "[]"
+        node = fetcher.fetch(2)
+        name_node = node[0]
+        name_node.type = :identifier
+        name_node.text = node.map{|x|x.text}.join
+      elsif (nx = fetcher.check(2)) && (nx[0].type == :identifier) && !("!?=".index(nx[1] ? nx[1].text : "nil")).nil?
+        node = fetcher.fetch(2)
+        name_node = node[0]
+        name_node.type = :identifier
+        name_node.text = node.map{|x|x.text}.join
+      elsif OPERATORS.include?(node.text)
+        name_node = fetcher.fetch
+      elsif node.type == :identifier
+        name_node = fetcher.fetch
+      else
+        raize "Expected function name, got #{node.inspect}", node
+      end
+
+
+      rcvr_node = nil
+      if (test_node = fetcher.check) && (test_node.text == ".")
+        if name_node.text != "self"
+          raize "Invalid function receiver '#{name_node.text}'", name_node
+        else
+          node1 = fetcher.fetch
+          node2 = fetcher.fetch
+          if node2.type != :identifier
+            raize "Expected function name", node2
+          else
+            rcvr_node, name_node = name_node, node2
+          end
+        end
+      end
+
+      if (node = fetcher.check).nil?
+        raize "Expected function body", node
+      else
+        args_node = fetch_function_params(fetcher)
+      end
+
+      @name_detector.enter_scope :function, name_node.text
+      @name_detector.register_function (rcvr_node ? rcvr_node.text : nil), name_node.text, args_node
+      body_node = fetch_sexp(fetcher)
+      fetch_word fetcher, "end", true
+      @name_detector.leave_scope
+
+      Lex::Function.new(rcvr_node, name_node, args_node, body_node)
+    end
+    def fetch_if(fetcher)
+      wslist = [:cr, :lf, :crlf, :whitespace, :comment]
+
+      if (if_node = fetcher.check) && ["if", "elsif"].include?(if_node.text)
+        fetcher.fetch
+      else
+        raize "Expected 'if'", if_node
+      end
+
+      if (cond_node = fetch_single_expression(fetcher)).empty?
+        raize "Expected boolean expression", cond_node
+      end
+
+      skip_linefeed fetcher
+      expr1 = fetch_sexp(fetcher)
+
+      if (node = fetcher.check).nil?
+        raize "Expected 'elsif', 'else', or 'end'", fetcher.last
+      elsif node.type != :identifier
+        raize "Expected 'elsif', 'else', or 'end'; found #{node.inspect}", fetcher.last
+      elsif (node = fetcher.check) && (node.text == "elsif")
+        child_if = fetch_if(fetcher)
+        Lex::IfBlock.new(if_node, cond_node, expr1, [child_if])
+      elsif node.text == "else"
+        fetcher.fetch
+        expr2 = fetch_sexp(fetcher)
+        fetch_word fetcher, "end", true
+
+        Lex::IfBlock.new(if_node, cond_node, expr1, expr2)
+      elsif node.text == "end"
+        fetcher.fetch
+        Lex::IfBlock.new(if_node, cond_node, expr1, nil)
+      else
+        raize "Expected 'end', found #{node.inspect}"
+      end
+    end
+    def fetch_loop(fetcher)
+      # loop [do]...end
+
+      fetch_word fetcher, "loop", true
+      fetch_word fetcher, "do", false
+      skip_linefeed fetcher
+      body_node = fetch_sexp(fetcher)
+      fetch_word fetcher, "end", true
+
+      Lex::LoopBlock.new(body_node)
+    end
+    def fetch_while(fetcher)
+      # while condition [do]...end
+
+      fetch_word fetcher, "while", true
+
+      if (cond_node = fetch_single_expression(fetcher)).empty?
+        raize "Expected boolean expression", cond_node
+      end
+
+      skip_whitespaces fetcher
+      fetch_word fetcher, "do", false
+      skip_linefeed fetcher
+      body_node = fetch_sexp(fetcher)
+      fetch_word fetcher, "end", true
+
+      Lex::WhileBlock.new(cond_node, body_node)
+    end
+    def fetch_for(fetcher)
+      # for variable in iterator [do]...end
+
+      fetch_word fetcher, "for", true
+      var_node = fetch_variable(fetcher)
+      fetch_word fetcher, "in", true
+
+      if (iter_node = fetch_single_expression(fetcher)).nil?
+        raize "Expected iterator", fetcher.last
+      elsif iter_node.empty?
+        raize "Expected iterator", iter_node
+      end
+
+      fetch_word fetcher, "do", false
+      skip_linefeed fetcher
+      body_node = fetch_sexp(fetcher)
+      fetch_word fetcher, "end", true
+
+      Lex::ForBlock.new(var_node, iter_node, body_node)
+    end
+    def fetch_sexp(fetcher)
+      sexp = []
+
+      loop do
+        oldpos = fetcher.pos
+
+        skip_linefeed fetcher
+
+        if node = fetcher.check
+          if node.type == :identifier
+            if node.text == "class"
+              sexp << fetch_class_def(fetcher)
+            elsif node.text == "def"
+              sexp << fetch_function_def(fetcher)
+            elsif ["elsif", "else", "end"].include?(node.text)
+              break
+            elsif ["break"].include?(node.text)
+              sexp << fetcher.fetch
+            elsif node.text == "if"
+              sexp << fetch_if(fetcher)
+            elsif node.text == "loop"
+              sexp << fetch_loop(fetcher)
+            elsif node.text == "while"
+              sexp << fetch_while(fetcher)
+            elsif node.text == "for"
+              sexp << fetch_for(fetcher)
+            else
+              sexp += fetch_single_expression(fetcher)
+            end
+          elsif [:lf, :cr, :crlf].include?(node.type)
+            fetcher.fetch
+          elsif node.type == :rbrk
+            break
+          else
+            sexp += fetch_single_expression(fetcher)
+          end
+        else
+          break
+        end
+
+        if fetcher.pos == oldpos
+          raize "Parse nothing in fetch_sexp", fetcher.element
+          break
+        end
+      end
+
+      sexp
+    end
+
+    public
+    def self.sexp_to_s(sexp)
+      Lex::Node.any_to_s sexp
+    end
+    def self.sexp_to_a(sexp)
+      Lex::Node.any_to_a sexp
+    end
+    def self.convert_tokens_to_lex_nodes(tokens)
+      tokens.map{|x|Lex::Node.new(x.row, x.col, x.source, x.type, x.text)}
+    end
+    def find_tokens(tokens, text)
+      pat = text.is_a?(Array) ? text : [text]
+      cnt = pat.count
+      pos = 0
+
+      while pos <= (tokens.count - cnt)
+        if (pos...(pos + cnt)).map{|x|tokens[x].text} == pat
+          yield pos
+        end
+        pos += 1
+      end
+    end
+    def to_sexp_array(tokens)
+      begin
+        nodes = self.class.convert_tokens_to_lex_nodes(tokens)
+        nodes = fetch_sexp(NodeFetcher.new(nodes))
+      rescue Exception => e
+        ExceptionHelper.show e, @error_formatter
+        nil
+      end
+    end
+  end
+end
+=end

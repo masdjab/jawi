@@ -28,15 +28,16 @@ class Pe32SectionTable
       @sections.values
     end
   end
-
+  
   public
   def key?(key)
     @sections.key?(key)
   end
-  def add(section)
+  def append(section)
+    puts "section '#{section.name}' => file offset: #{@file_offset.to_s(16)}"
     section.setup @section_address, @file_offset
     @file_offset += section.size_of_raw_data
-    @section_address += int_align(section.data.length, @alignment.section_alignment)
+    @section_address += int_align(section.virtual_size, @alignment.section_alignment)
     @sections[section.name] = section
   end
   def items

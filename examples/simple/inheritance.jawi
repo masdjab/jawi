@@ -2,7 +2,7 @@ interface Greetable
   void greet()
 end
 
-interface NamedHumand
+interface NamedHuman
   str get_name()
 end
 
@@ -22,7 +22,7 @@ class Person < Greetable
 end
 
 
-class Programmer < Person, Greetable, NamedHumand
+class Programmer < Person, Greetable, NamedHuman
   private str lang
   
   private void initialize(str name, int age, str lang)

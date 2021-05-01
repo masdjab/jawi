@@ -189,8 +189,9 @@ class Pe32Struct
     
     file_timestamp = @timestamp ? @timestamp : Time.new
     raw_header_size = self.class.calc_header_size(@section_info_list.count)
-    size_of_headers = int_align(raw_header_size, @alignment.file_alignment)
-    section_info_bin = @section_info_list.map{|x|x.to_bin(size_of_headers)}.join
+    header_size_in_pages = int_align(raw_header_size, @alignment.file_alignment)
+    puts "pe32_struct.header_size_in_pages: 0x#{header_size_in_pages.to_s(16)}"
+    section_info_bin = @section_info_list.map{|x|x.to_bin(header_size_in_pages)}.join
     
     header = 
       [
@@ -227,7 +228,7 @@ class Pe32Struct
           int2bin(@subsystem_version.minor, :word),             # 00CA
           int2bin(win32_version_value = 0, :dword),             # 00CC
           int2bin(@size_of_image, :dword),                      # 00D0
-          int2bin(size_of_headers, :dword),                     # 00D4
+          int2bin(header_size_in_pages, :dword),                # 00D4
           int2bin(checksum = 0, :dword),                        # 00D8
           int2bin(@subsystem, :word),                           # 00DC
           int2bin(@dll_characteristics, :word),                 # 00DE

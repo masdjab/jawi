@@ -10,7 +10,7 @@ end
 class SectionBase
   attr_reader   :name, :type, :flag, :alignment
   attr_accessor :data, :section_base_address
-
+  
   private
   def initialize(name, type, flag, alignment, data = "")
     @name = name
@@ -21,7 +21,7 @@ class SectionBase
     @section_base_address = 0
     @section_file_offset = 0
   end
-
+  
   public
   def setup(section_base_address, section_file_offset)
     @section_base_address = section_base_address

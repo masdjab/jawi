@@ -5,7 +5,7 @@ require_relative 'pe32_section'
 
 class Pe32ImportSection < Pe32Section
   attr_accessor :image_base_address, :section_base_address
-
+  
   private
   def initialize(name, type, flag, alignment)
     super(name, type, flag, alignment, "")
@@ -33,7 +33,7 @@ class Pe32ImportSection < Pe32Section
       sorted_libraries = @libraries.sort
       lib_name_table = ""
       fun_name_table = ""
-
+      
       ln_index = 0
       offset = @section_base_address + directory_table.length + lookup_table.length
       sorted_libraries.each do |lib|
@@ -43,7 +43,7 @@ class Pe32ImportSection < Pe32Section
       end
       lib_name_table = append_name_to_table(lib_name_table, "")
       lib_name_table = str_align(lib_name_table, 0x10)
-
+      
       ln_index = 0
       fn_index = 0
       iat_offset = @section_base_address + directory_table.length
@@ -65,12 +65,13 @@ class Pe32ImportSection < Pe32Section
         ln_index += 1
       end
       fun_name_table = str_align(fun_name_table, 0x10)
-
+      
       @imports_changed = false
-
+      
       @data = directory_table + lookup_table + lib_name_table + fun_name_table
+      @virtual_size = @data.length
     end
-
+    
     @data
   end
 

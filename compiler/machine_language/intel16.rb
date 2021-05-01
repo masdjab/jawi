@@ -1,4 +1,6 @@
 require_relative '../../libs/binary_converter'
+require_relative '../machine_code'
+
 
 module Compiler
   module MachineLanguage
@@ -18,22 +20,22 @@ module Compiler
       def set_accumulator(value, size)
         compose hex2bin("B8") + int2bin(value, :word), 1, 2
       end
-      def push_accumulator
-        compose hex2bin("50"), 0, 0
-      end
       def push_immediate(value)
         compose hex2bin("68") + int2bin(value, :word), 1, 2
+      end
+      def push_accumulator
+        compose hex2bin("50"), 0, 0
       end
       def get_global_variable(location, size)
         compose hex2bin("A1") + int2bin(location, :word), 1, 2
       end
-      def set_global_variable(location, size, value)
+      def set_global_variable(location, size)
         compose hex2bin("A3") + int2bin(location, :word), 1, 2
       end
       def get_local_variable(index, size)
         compose hex2bin("8B46") + int2bin(-((index + 1) * 2), :byte), 2, 1
       end
-      def set_local_variable(index, size, value)
+      def set_local_variable(index, size)
         compose hex2bin("8946") + int2bin(-((index + 1) * 2), :byte), 2, 1
       end
       def get_parameter(index, size)

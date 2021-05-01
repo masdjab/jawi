@@ -8,11 +8,11 @@ class Pe32Section < SectionBase
     :section, :virtual_size, :virtual_address, :size_of_raw_data,
     :pointer_to_raw_data, :pointer_to_relocations, :pointer_to_line_numbers,
     :number_of_relocations, :number_of_line_numbers
-
+  
   private
-  def initialize(name, type, flag, alignment, data = "")
+  def initialize(name, type, flag, alignment, data = "", virtual_size = 0)
     super(name, type, flag, alignment, data)
-    @virtual_size = 0
+    @virtual_size = virtual_size
     @virtual_address = 0
     @size_of_raw_data = 0
     @pointer_to_raw_data = 0
@@ -29,20 +29,24 @@ class Pe32Section < SectionBase
     CodeUtil.int_align(data, size)
   end
   def build_section_information
-    @virtual_size = data.length
+    # @virtual_size = data.length
+    # @virtual_address = @section_base_address
+    # @size_of_raw_data = int_align(@virtual_size, @alignment.file_alignment)
+    # @pointer_to_raw_data = @section_file_offset
+    
     @virtual_address = @section_base_address
-    @size_of_raw_data = int_align(@virtual_size, @alignment.file_alignment)
+    @size_of_raw_data = int_align(data.length, @alignment.file_alignment)
     @pointer_to_raw_data = @section_file_offset
   end
-
+  
   public
   def setup(section_base_address, section_file_offset)
     super(section_base_address, section_file_offset)
     build_section_information
   end
-  def to_bin(base_offset = 0)
-    raw_data_offset = @pointer_to_raw_data ? base_offset + @pointer_to_raw_data : 0
-
+  def to_bin(file_offset = 0)
+    raw_data_offset = @pointer_to_raw_data ? file_offset + @pointer_to_raw_data : 0
+    
     temp =
         [
             (@name ? @name[0..7] : "").ljust(8, 0.chr),

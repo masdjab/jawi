@@ -12,22 +12,22 @@ module Compiler
       def set_accumulator(value, size)
         raise_not_implemented
       end
-      def push_accumulator
+      def push_immediate(value)
         raise_not_implemented
       end
-      def push_immediate(value)
+      def push_accumulator
         raise_not_implemented
       end
       def get_global_variable(location, size)
         raise_not_implemented
       end
-      def set_global_variable(location, size, value)
+      def set_global_variable(location, size)
         raise_not_implemented
       end
       def get_local_variable(index, size)
         raise_not_implemented
       end
-      def set_local_variable(index, size, value)
+      def set_local_variable(index, size)
         raise_not_implemented
       end
       def get_parameter(index, size)

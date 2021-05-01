@@ -1,8 +1,8 @@
-import('user32.dll', 'MessageBoxA') int msgbox(int hwnd, str title, str message, int flags)
-import('kernel32.dll', 'ExitProcess') int exit_process(int arg)
+int MsgBox(int hWnd, str Title, str Message, int Flags) = DllImport('user32.dll', 'MessageBoxA')
+int ExitProcess(int Arg) = DllImport('kernel32.dll', 'ExitProcess')
 
 str title = "Message Title\0"
 str message = "This is a MessageBox test using Jawi Compiler.\0"
 
-int resp = msgbox(0, message, title, 0)
-exit_process 0
+int resp = MsgBox(0, message, title, 0)
+ExitProcess 0
